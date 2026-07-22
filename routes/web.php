@@ -10,6 +10,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::middleware('role:admin')->group(function () {
         Volt::route('equipos', 'equipment.index')->name('equipment.index');
+        Volt::route('equipos/{equipment}', 'equipment.show')->name('equipment.show');
         Volt::route('planes-mantenimiento', 'maintenance-plans.index')->name('maintenance-plans.index');
         Volt::route('usuarios', 'users.index')->name('users.index');
     });

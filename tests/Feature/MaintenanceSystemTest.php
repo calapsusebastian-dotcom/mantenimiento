@@ -65,6 +65,38 @@ class MaintenanceSystemTest extends TestCase
         $this->assertTrue($equipment->refresh()->active);
     }
 
+    public function test_admin_can_view_equipment_history(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $tecnico = $this->makeUser(UserRole::Tecnico);
+        $equipment = $this->makeEquipment(['name' => 'Compresor historial', 'created_by' => $admin->id]);
+        $workOrder = WorkOrder::create([
+            'equipment_id' => $equipment->id,
+            'type' => WorkOrderType::Correctivo,
+            'priority' => WorkOrderPriority::Alta,
+            'status' => WorkOrderStatus::Completada,
+            'title' => 'Falla resuelta de prueba',
+            'assigned_to' => $tecnico->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->get('/equipos/'.$equipment->id)
+            ->assertOk()
+            ->assertSee('Compresor historial')
+            ->assertSee('Falla resuelta de prueba')
+            ->assertSee($tecnico->name);
+    }
+
+    public function test_technicians_and_operators_cannot_access_equipment_history(): void
+    {
+        $tecnico = $this->makeUser(UserRole::Tecnico);
+        $operador = $this->makeUser(UserRole::Operador);
+        $equipment = $this->makeEquipment();
+
+        $this->actingAs($tecnico)->get('/equipos/'.$equipment->id)->assertForbidden();
+        $this->actingAs($operador)->get('/equipos/'.$equipment->id)->assertForbidden();
+    }
+
     public function test_inactive_equipment_is_excluded_from_new_work_order_reports(): void
     {
         $operador = $this->makeUser(UserRole::Operador);
@@ -162,6 +194,26 @@ class MaintenanceSystemTest extends TestCase
         $this->assertTrue(MaintenancePlan::where('name', 'Lubricación mensual')->exists());
     }
 
+    public function test_calendar_plan_link_opens_the_edit_modal_for_that_plan(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment(['created_by' => $admin->id]);
+        $plan = MaintenancePlan::create([
+            'equipment_id' => $equipment->id,
+            'name' => 'Plan enlazado desde calendario',
+            'frequency_days' => 15,
+            'next_due_date' => now(),
+            'active' => true,
+            'created_by' => $admin->id,
+        ]);
+
+        $this->actingAs($admin);
+
+        $this->get('/planes-mantenimiento?edit='.$plan->id)
+            ->assertOk()
+            ->assertSee('Plan enlazado desde calendario');
+    }
+
     public function test_operator_can_report_a_failure(): void
     {
         $operador = $this->makeUser(UserRole::Operador);
@@ -213,6 +265,62 @@ class MaintenanceSystemTest extends TestCase
         $this->assertSame(WorkOrderStatus::Completada, $workOrder->status);
         $this->assertSame(EquipmentStatus::Operativo, $equipment->status);
         $this->assertGreaterThanOrEqual(3, $workOrder->logs()->count());
+    }
+
+    public function test_completing_a_work_order_returns_out_of_service_equipment_to_operational(): void
+    {
+        $tecnico = $this->makeUser(UserRole::Tecnico);
+        $equipment = $this->makeEquipment(['status' => EquipmentStatus::FueraDeServicio]);
+        $workOrder = WorkOrder::create([
+            'equipment_id' => $equipment->id,
+            'type' => WorkOrderType::Correctivo,
+            'priority' => WorkOrderPriority::Alta,
+            'status' => WorkOrderStatus::Pendiente,
+            'title' => 'Equipo fuera de servicio por falla mayor',
+        ]);
+
+        $this->actingAs($tecnico);
+        $component = Volt::test('work-orders.show', ['workOrder' => $workOrder]);
+        $component->call('take')->call('start');
+
+        // The equipment stays "fuera de servicio" (start() only auto-switches from Operativo).
+        $this->assertSame(EquipmentStatus::FueraDeServicio, $equipment->refresh()->status);
+
+        $component->set('resolution_notes', 'Se reparó el componente dañado.')->call('complete');
+
+        $this->assertSame(EquipmentStatus::Operativo, $equipment->refresh()->status);
+    }
+
+    public function test_completing_a_preventive_work_order_advances_its_plan_next_due_date(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $tecnico = $this->makeUser(UserRole::Tecnico);
+        $equipment = $this->makeEquipment(['created_by' => $admin->id]);
+        $plan = MaintenancePlan::create([
+            'equipment_id' => $equipment->id,
+            'name' => 'Plan con orden real',
+            'frequency_days' => 15,
+            'next_due_date' => now()->subDay(),
+            'active' => true,
+            'created_by' => $admin->id,
+        ]);
+        $workOrder = WorkOrder::create([
+            'equipment_id' => $equipment->id,
+            'maintenance_plan_id' => $plan->id,
+            'type' => WorkOrderType::Preventivo,
+            'priority' => WorkOrderPriority::Media,
+            'status' => WorkOrderStatus::Pendiente,
+            'title' => 'Mantenimiento preventivo: '.$plan->name,
+            'scheduled_for' => $plan->next_due_date,
+        ]);
+
+        $this->actingAs($tecnico);
+        $component = Volt::test('work-orders.show', ['workOrder' => $workOrder]);
+        $component->call('take')->call('start');
+        $component->set('resolution_notes', 'Revisión completa realizada.')->call('complete');
+
+        $this->assertSame(WorkOrderStatus::Completada, $workOrder->refresh()->status);
+        $this->assertTrue($plan->refresh()->next_due_date->isFuture());
     }
 
     public function test_operator_cannot_open_a_work_order_reported_by_someone_else(): void
@@ -272,7 +380,7 @@ class MaintenanceSystemTest extends TestCase
     public function test_calendar_shows_a_scheduled_work_order_in_the_current_month(): void
     {
         $admin = $this->makeUser(UserRole::Admin);
-        $equipment = $this->makeEquipment(['created_by' => $admin->id]);
+        $equipment = $this->makeEquipment(['name' => 'Motor calendario', 'created_by' => $admin->id]);
         WorkOrder::create([
             'equipment_id' => $equipment->id,
             'type' => WorkOrderType::Correctivo,
@@ -284,6 +392,8 @@ class MaintenanceSystemTest extends TestCase
 
         Volt::actingAs($admin)
             ->test('calendar.index')
+            // The chip shows the equipment name; the order title stays as a tooltip.
+            ->assertSee('Motor calendario')
             ->assertSee('Revisión de motor');
     }
 
@@ -364,6 +474,88 @@ class MaintenanceSystemTest extends TestCase
         ]);
 
         Volt::actingAs($admin)->test('calendar.index')->assertSee('Bomba recurrente');
+    }
+
+    public function test_admin_can_verify_a_plan_due_today_from_the_calendar(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment(['created_by' => $admin->id]);
+        $plan = MaintenancePlan::create([
+            'equipment_id' => $equipment->id,
+            'name' => 'Plan verificable',
+            'frequency_days' => 20,
+            'next_due_date' => now(),
+            'active' => true,
+            'created_by' => $admin->id,
+        ]);
+
+        Volt::actingAs($admin)
+            ->test('calendar.index')
+            ->set('verifyNotes', 'Se lubricaron los rodamientos y quedó en buen estado.')
+            ->call('verifyPlan', $plan->id);
+
+        $workOrder = WorkOrder::where('maintenance_plan_id', $plan->id)->first();
+
+        $this->assertNotNull($workOrder);
+        $this->assertSame(WorkOrderStatus::Completada, $workOrder->status);
+        $this->assertSame(WorkOrderType::Preventivo, $workOrder->type);
+        $this->assertSame('Se lubricaron los rodamientos y quedó en buen estado.', $workOrder->resolution_notes);
+        $this->assertNotNull($workOrder->completed_at);
+        $this->assertSame(1, $workOrder->logs()->count());
+        $this->assertTrue($plan->refresh()->next_due_date->isFuture());
+        $this->assertSame(now()->format('Y-m-d'), $workOrder->scheduled_for->format('Y-m-d'));
+
+        // The verified work order stays anchored on the calendar (marked as
+        // done) instead of disappearing once the plan moves to its next date,
+        // and keeps showing the equipment name, not the generic order title.
+        Volt::actingAs($admin)
+            ->test('calendar.index')
+            ->assertSee($equipment->name);
+    }
+
+    public function test_technician_cannot_verify_a_plan_from_the_calendar(): void
+    {
+        $tecnico = $this->makeUser(UserRole::Tecnico);
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment(['created_by' => $admin->id]);
+        $plan = MaintenancePlan::create([
+            'equipment_id' => $equipment->id,
+            'name' => 'Plan protegido',
+            'frequency_days' => 20,
+            'next_due_date' => now(),
+            'active' => true,
+            'created_by' => $admin->id,
+        ]);
+
+        Volt::actingAs($tecnico)->test('calendar.index')->call('verifyPlan', $plan->id)->assertForbidden();
+    }
+
+    public function test_calendar_day_modal_shows_every_work_order_for_a_busy_day(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment(['created_by' => $admin->id]);
+        $day = now()->format('Y-m-d');
+
+        foreach (range(1, 5) as $i) {
+            WorkOrder::create([
+                'equipment_id' => $equipment->id,
+                'type' => WorkOrderType::Correctivo,
+                'priority' => WorkOrderPriority::Media,
+                'status' => WorkOrderStatus::Pendiente,
+                'title' => "Falla número {$i}",
+                'scheduled_for' => $day,
+            ]);
+        }
+
+        $component = Volt::actingAs($admin)->test('calendar.index');
+
+        $component->assertSee('+2 más');
+
+        $component->call('showDay', $day);
+
+        foreach (range(1, 5) as $i) {
+            $component->assertSee("Falla número {$i}");
+        }
     }
 
     public function test_calendar_navigation_changes_the_displayed_month(): void

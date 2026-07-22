@@ -54,7 +54,7 @@ new #[Layout('layouts.app')] #[Title('Dashboard')] class extends Component
     }
 }; ?>
 
-<div>
+<div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header title="Dashboard" />
 
     <div class="py-10">

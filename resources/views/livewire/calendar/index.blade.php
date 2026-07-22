@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\WorkOrderPriority;
 use App\Enums\WorkOrderStatus;
+use App\Enums\WorkOrderType;
 use App\Models\MaintenancePlan;
 use App\Models\WorkOrder;
 use Illuminate\Support\Carbon;
@@ -12,10 +14,37 @@ new #[Layout('layouts.app')] #[Title('Calendario de mantenimiento')] class exten
 {
     public string $month = '';
     public array $scheduleDate = [];
+    public string $selectedDay = '';
+    public ?int $verifyingPlanId = null;
+    public string $verifyNotes = '';
 
     public function mount(): void
     {
         $this->month = now()->format('Y-m');
+    }
+
+    public function openVerifyModal(int $planId): void
+    {
+        abort_unless(auth()->user()->isAdmin(), 403);
+
+        $this->verifyingPlanId = $planId;
+        $this->verifyNotes = '';
+    }
+
+    public function closeVerifyModal(): void
+    {
+        $this->verifyingPlanId = null;
+        $this->verifyNotes = '';
+    }
+
+    public function showDay(string $date): void
+    {
+        $this->selectedDay = $date;
+    }
+
+    public function closeDay(): void
+    {
+        $this->selectedDay = '';
     }
 
     public function scheduleFor(int $workOrderId): void
@@ -39,6 +68,52 @@ new #[Layout('layouts.app')] #[Title('Calendario de mantenimiento')] class exten
         ]);
 
         unset($this->scheduleDate[$workOrderId]);
+    }
+
+    /**
+     * Manually confirm that a plan's currently due preventive check was
+     * carried out, without waiting for the daily scheduled command. Only
+     * valid for the plan's actual next_due_date — not a projected future
+     * occurrence, which hasn't happened yet.
+     */
+    public function verifyPlan(int $planId): void
+    {
+        abort_unless(auth()->user()->isAdmin(), 403);
+
+        $this->validate(['verifyNotes' => ['required', 'string']], [], ['verifyNotes' => 'notas']);
+
+        $plan = MaintenancePlan::findOrFail($planId);
+        $user = auth()->user();
+        $today = Carbon::today();
+        $dueDate = $plan->next_due_date->copy();
+
+        $workOrder = WorkOrder::create([
+            'equipment_id' => $plan->equipment_id,
+            'maintenance_plan_id' => $plan->id,
+            'type' => WorkOrderType::Preventivo,
+            'priority' => WorkOrderPriority::Media,
+            'status' => WorkOrderStatus::Completada,
+            'title' => 'Mantenimiento preventivo: '.$plan->name,
+            'description' => $plan->checklist,
+            'resolution_notes' => $this->verifyNotes,
+            'scheduled_for' => $dueDate,
+            'completed_at' => now(),
+        ]);
+
+        $workOrder->logs()->create([
+            'user_id' => $user->id,
+            'comment' => 'Verificación de mantenimiento preventivo confirmada desde el calendario: '.$this->verifyNotes,
+        ]);
+
+        $nextDue = $plan->next_due_date->copy();
+
+        do {
+            $nextDue = $nextDue->addDays($plan->frequency_days);
+        } while ($nextDue->lte($today));
+
+        $plan->update(['next_due_date' => $nextDue]);
+
+        $this->closeVerifyModal();
     }
 
     public function previousMonth(): void
@@ -165,7 +240,7 @@ new #[Layout('layouts.app')] #[Title('Calendario de mantenimiento')] class exten
     }
 }; ?>
 
-<div>
+<div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header title="Calendario de mantenimiento">
         <x-slot:actions>
             <div class="flex items-center gap-2">
@@ -218,8 +293,10 @@ new #[Layout('layouts.app')] #[Title('Calendario de mantenimiento')] class exten
             <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
                 <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Preventivo</span>
                 <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span> Correctivo</span>
+                <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-green-500"></span> Hecho (clic para ver o agregar una nota)</span>
                 @if ($isAdmin)
                     <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full border-2 border-indigo-500"></span> Vencimiento proyectado de un plan preventivo (según su frecuencia)</span>
+                    <span class="inline-flex items-center gap-1.5"><x-icon name="check-circle" class="w-3.5 h-3.5 text-green-600 dark:text-green-400" /> Marcar verificación realizada (solo en la fecha real de vencimiento)</span>
                 @endif
             </div>
 
@@ -247,18 +324,35 @@ new #[Layout('layouts.app')] #[Title('Calendario de mantenimiento')] class exten
 
                                 <div class="mt-1 space-y-1">
                                     @foreach ($dayWorkOrders->take(3) as $workOrder)
+                                        @php $isDone = $workOrder->status->value === 'completada'; @endphp
                                         <a href="{{ route('work-orders.show', $workOrder) }}" wire:navigate
-                                            title="{{ $workOrder->title }} — {{ $workOrder->equipment->name }}"
-                                            class="block truncate rounded px-1.5 py-0.5 text-xs font-medium {{ $workOrder->type->value === 'preventivo' ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400' : 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400' }} hover:opacity-75">
-                                            {{ $workOrder->title }}
+                                            title="{{ $workOrder->title }} — {{ $workOrder->equipment->name }}{{ $isDone ? ' (hecho — clic para agregar una nota)' : '' }}"
+                                            class="flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs font-medium hover:opacity-75 {{ $isDone ? 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400' : ($workOrder->type->value === 'preventivo' ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400' : 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400') }}">
+                                            @if ($isDone)
+                                                <x-icon name="check-circle" class="w-3 h-3 shrink-0" />
+                                            @endif
+                                            <span class="truncate {{ $isDone ? 'line-through' : '' }}">{{ $workOrder->equipment->name }}</span>
                                         </a>
                                     @endforeach
 
                                     @if ($isAdmin)
                                         @foreach ($dayPlans->take(3) as $plan)
-                                            <div title="Plan: {{ $plan->name }} — {{ $plan->equipment->name }}"
-                                                class="block truncate rounded px-1.5 py-0.5 text-xs font-medium border border-dashed border-indigo-300 text-indigo-600 dark:border-indigo-500/40 dark:text-indigo-400">
-                                                {{ $plan->equipment->name }}
+                                            @php $isActualDueDate = $plan->next_due_date->format('Y-m-d') === $key; @endphp
+                                            <div class="flex items-center gap-1 rounded border border-dashed border-indigo-300 dark:border-indigo-500/40 px-1.5 py-0.5">
+                                                @if ($isActualDueDate)
+                                                    <button wire:click="openVerifyModal({{ $plan->id }})"
+                                                        title="Plan: {{ $plan->name }} — {{ $plan->equipment->name }} (clic para marcar como hecho)"
+                                                        class="flex-1 min-w-0 truncate text-left text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
+                                                        {{ $plan->equipment->name }}
+                                                    </button>
+                                                    <x-icon name="check-circle" class="w-3.5 h-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                                                @else
+                                                    <a href="{{ route('maintenance-plans.index', ['edit' => $plan->id]) }}" wire:navigate
+                                                        title="Plan: {{ $plan->name }} — {{ $plan->equipment->name }}"
+                                                        class="flex-1 min-w-0 truncate text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
+                                                        {{ $plan->equipment->name }}
+                                                    </a>
+                                                @endif
                                             </div>
                                         @endforeach
                                     @endif
@@ -266,7 +360,7 @@ new #[Layout('layouts.app')] #[Title('Calendario de mantenimiento')] class exten
                                     @php $shown = min($dayWorkOrders->count(), 3) + ($isAdmin ? min($dayPlans->count(), 3) : 0); @endphp
                                     @php $total = $dayWorkOrders->count() + ($isAdmin ? $dayPlans->count() : 0); @endphp
                                     @if ($total > $shown)
-                                        <div class="text-xs text-gray-400 dark:text-gray-500 px-1.5">+{{ $total - $shown }} más</div>
+                                        <button wire:click="showDay('{{ $key }}')" class="w-full text-left text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline px-1.5">+{{ $total - $shown }} más</button>
                                     @endif
                                 </div>
                             </div>
@@ -276,4 +370,106 @@ new #[Layout('layouts.app')] #[Title('Calendario de mantenimiento')] class exten
             </div>
         </div>
     </div>
+
+    @if ($selectedDay)
+        @php
+            $modalDate = Carbon::createFromFormat('Y-m-d', $selectedDay);
+            $modalWorkOrders = $workOrdersByDay->get($selectedDay, collect());
+            $modalPlans = $isAdmin ? $plansByDay->get($selectedDay, collect()) : collect();
+        @endphp
+        <div class="fixed inset-0 z-50 overflow-y-auto px-4 py-6 sm:px-0">
+            <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" wire:click="closeDay"></div>
+
+            <div class="relative mb-6 bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-xl ring-1 ring-gray-900/5 dark:ring-white/10 sm:max-w-lg sm:mx-auto">
+                <div class="p-6 sm:p-8">
+                    <div class="flex items-center justify-between mb-5">
+                        <h2 class="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ $modalDate->format('d/m/Y') }}</h2>
+                        <button wire:click="closeDay" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                            <x-icon name="x-mark" class="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    <ul class="space-y-2 max-h-[28rem] overflow-y-auto">
+                        @foreach ($modalWorkOrders as $workOrder)
+                            @php $isDone = $workOrder->status->value === 'completada'; @endphp
+                            <li>
+                                <a href="{{ route('work-orders.show', $workOrder) }}" wire:navigate
+                                    class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800">
+                                    @if ($isDone)
+                                        <x-icon name="check-circle" class="w-4 h-4 shrink-0 text-green-600 dark:text-green-400" />
+                                    @endif
+                                    <span class="min-w-0 flex-1 {{ $isDone ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-gray-100' }}">
+                                        {{ $workOrder->equipment->name }}
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 truncate">{{ $workOrder->title }}</span>
+                                    </span>
+                                    <x-badge :color="$workOrder->status->color()">{{ $workOrder->status->label() }}</x-badge>
+                                </a>
+                            </li>
+                        @endforeach
+
+                        @foreach ($modalPlans as $plan)
+                            @php $modalIsActualDueDate = $plan->next_due_date->format('Y-m-d') === $selectedDay; @endphp
+                            <li>
+                                @if ($modalIsActualDueDate)
+                                    <button wire:click="openVerifyModal({{ $plan->id }})"
+                                        class="flex w-full items-center gap-2 rounded-lg border border-dashed border-indigo-300 dark:border-indigo-500/40 px-3 py-2 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10">
+                                        <span class="min-w-0 flex-1 text-left">
+                                            {{ $plan->equipment->name }}
+                                            <span class="block text-xs opacity-75 truncate">Plan: {{ $plan->name }} · clic para marcar como hecho</span>
+                                        </span>
+                                        <x-icon name="check-circle" class="w-4 h-4 shrink-0" />
+                                    </button>
+                                @else
+                                    <a href="{{ route('maintenance-plans.index', ['edit' => $plan->id]) }}" wire:navigate
+                                        class="flex items-center gap-2 rounded-lg border border-dashed border-indigo-300 dark:border-indigo-500/40 px-3 py-2 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10">
+                                        <span class="min-w-0 flex-1">
+                                            {{ $plan->equipment->name }}
+                                            <span class="block text-xs opacity-75 truncate">Plan: {{ $plan->name }}</span>
+                                        </span>
+                                    </a>
+                                @endif
+                            </li>
+                        @endforeach
+                    </ul>
+
+                    <div class="mt-5 flex justify-end">
+                        <x-secondary-button wire:click="closeDay">Cerrar</x-secondary-button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($verifyingPlanId)
+        @php $verifyingPlan = \App\Models\MaintenancePlan::with('equipment')->find($verifyingPlanId); @endphp
+        @if ($verifyingPlan)
+            <div class="fixed inset-0 z-50 overflow-y-auto px-4 py-6 sm:px-0">
+                <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" wire:click="closeVerifyModal"></div>
+
+                <div class="relative mb-6 bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-xl ring-1 ring-gray-900/5 dark:ring-white/10 sm:max-w-lg sm:mx-auto">
+                    <form wire:submit="verifyPlan({{ $verifyingPlan->id }})" class="p-6 sm:p-8">
+                        <h2 class="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+                            Marcar mantenimiento como realizado
+                        </h2>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            {{ $verifyingPlan->name }} — {{ $verifyingPlan->equipment->name }}
+                        </p>
+
+                        <div class="mt-5">
+                            <x-input-label for="verifyNotes" value="¿Qué se hizo?" />
+                            <textarea id="verifyNotes" wire:model="verifyNotes" rows="4"
+                                class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                placeholder="Ej. Se lubricaron los rodamientos y se revisaron las bandas, todo en buen estado."></textarea>
+                            <x-input-error :messages="$errors->get('verifyNotes')" class="mt-2" />
+                        </div>
+
+                        <div class="mt-6 flex justify-end gap-3 pt-2">
+                            <x-secondary-button type="button" wire:click="closeVerifyModal">Cancelar</x-secondary-button>
+                            <x-primary-button type="submit">Marcar como realizado</x-primary-button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        @endif
+    @endif
 </div>

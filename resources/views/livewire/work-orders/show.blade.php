@@ -96,13 +96,24 @@ new #[Layout('layouts.app')] #[Title('Detalle de orden de trabajo')] class exten
             'comment' => 'Orden completada: '.$this->resolution_notes,
         ]);
 
+        if ($plan = $this->workOrder->maintenancePlan) {
+            $today = now()->startOfDay();
+            $nextDue = $plan->next_due_date->copy();
+
+            do {
+                $nextDue = $nextDue->addDays($plan->frequency_days);
+            } while ($nextDue->lte($today));
+
+            $plan->update(['next_due_date' => $nextDue]);
+        }
+
         $equipment = $this->workOrder->equipment;
         $hasOpenOrders = $equipment->workOrders()
             ->whereNot('id', $this->workOrder->id)
             ->whereIn('status', [WorkOrderStatus::Pendiente, WorkOrderStatus::Asignada, WorkOrderStatus::EnProgreso])
             ->exists();
 
-        if (! $hasOpenOrders && $equipment->status === EquipmentStatus::EnMantenimiento) {
+        if (! $hasOpenOrders && $equipment->status !== EquipmentStatus::Operativo) {
             $equipment->update(['status' => EquipmentStatus::Operativo]);
         }
 
@@ -150,12 +161,10 @@ new #[Layout('layouts.app')] #[Title('Detalle de orden de trabajo')] class exten
     }
 }; ?>
 
-<div>
+<div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header :title="'Orden #'.$workOrder->id.' — '.$workOrder->title">
         <x-slot:actions>
-            <a href="{{ route('work-orders.index') }}" wire:navigate class="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
-                <x-icon name="arrow-left" class="w-4 h-4" /> Volver al listado
-            </a>
+            <x-back-link :href="route('work-orders.index')" />
         </x-slot:actions>
     </x-page-header>
 

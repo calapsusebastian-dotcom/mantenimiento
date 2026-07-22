@@ -33,6 +33,10 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
     public function mount(): void
     {
         Gate::authorize('manage-equipment');
+
+        if ($equipmentId = request()->integer('edit')) {
+            Equipment::whereKey($equipmentId)->exists() && $this->edit($equipmentId);
+        }
     }
 
     public function updatingSearch(): void
@@ -142,7 +146,7 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
     }
 }; ?>
 
-<div>
+<div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header title="Equipos y maquinaria">
         <x-slot:actions>
             <x-primary-button wire:click="create">
@@ -188,7 +192,7 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
                             <tr wire:key="equipment-{{ $equipment->id }}" class="hover:bg-gray-50 dark:hover:bg-gray-800/50 {{ ! $equipment->active ? 'opacity-60' : '' }}">
                                 <td class="px-5 py-3.5 text-sm font-mono text-gray-500 dark:text-gray-400">{{ $equipment->code }}</td>
                                 <td class="px-5 py-3.5 text-sm text-gray-900 dark:text-gray-100">
-                                    <span class="font-medium">{{ $equipment->name }}</span>
+                                    <a href="{{ route('equipment.show', $equipment) }}" wire:navigate class="font-medium hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline">{{ $equipment->name }}</a>
                                     @if ($equipment->category)
                                         <span class="block text-xs text-gray-500 dark:text-gray-400">{{ $equipment->category }}</span>
                                     @endif

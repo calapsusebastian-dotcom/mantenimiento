@@ -125,7 +125,7 @@ new #[Layout('layouts.app')] #[Title('Órdenes de trabajo')] class extends Compo
     }
 }; ?>
 
-<div>
+<div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header title="Órdenes de trabajo">
         <x-slot:actions>
             <a href="{{ route('work-orders.report') }}" wire:navigate

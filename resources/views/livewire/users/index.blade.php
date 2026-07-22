@@ -121,7 +121,7 @@ new #[Layout('layouts.app')] #[Title('Usuarios')] class extends Component
     }
 }; ?>
 
-<div>
+<div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header title="Usuarios">
         <x-slot:actions>
             <x-primary-button wire:click="create">

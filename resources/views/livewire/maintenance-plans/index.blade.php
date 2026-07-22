@@ -26,6 +26,10 @@ new #[Layout('layouts.app')] #[Title('Planes de mantenimiento preventivo')] clas
     {
         Gate::authorize('manage-maintenance-plans');
         $this->next_due_date = now()->format('Y-m-d');
+
+        if ($planId = request()->integer('edit')) {
+            MaintenancePlan::whereKey($planId)->exists() && $this->edit($planId);
+        }
     }
 
     protected function rules(): array
@@ -102,7 +106,7 @@ new #[Layout('layouts.app')] #[Title('Planes de mantenimiento preventivo')] clas
     }
 }; ?>
 
-<div>
+<div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header title="Planes de mantenimiento preventivo">
         <x-slot:actions>
             <x-primary-button wire:click="create">
