@@ -661,4 +661,31 @@ class MaintenanceSystemTest extends TestCase
         $this->assertSame($admin->id, $checkout->returned_by);
         $this->assertFalse($equipment->isCheckedOut());
     }
+
+    public function test_bitacora_shows_which_equipment_is_available_and_which_is_out(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $available = $this->makeEquipment(['name' => 'Compresor libre']);
+        $outEquipment = $this->makeEquipment(['name' => 'Generador afuera']);
+        EquipmentCheckout::create([
+            'equipment_id' => $outEquipment->id,
+            'taken_by' => 'Carlos',
+            'destination' => 'Cliente ABC',
+            'condition_out' => 'bueno',
+            'checked_out_by' => $admin->id,
+            'checked_out_at' => now(),
+        ]);
+
+        Volt::actingAs($admin)
+            ->test('checkouts.index')
+            ->assertSee('Compresor libre')
+            ->assertSee('Generador afuera')
+            ->assertSee('Carlos')
+            ->assertSee('Cliente ABC')
+            ->assertSee('Disponible')
+            ->assertSee('Afuera');
+
+        $this->assertFalse($available->isCheckedOut());
+        $this->assertTrue($outEquipment->isCheckedOut());
+    }
 }

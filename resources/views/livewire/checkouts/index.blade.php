@@ -108,7 +108,20 @@ new #[Layout('layouts.app')] #[Title('Bitácora de equipo')] class extends Compo
 
     public function with(): array
     {
+        $equipmentBoard = Equipment::query()
+            ->where('active', true)
+            ->with(['checkouts' => fn ($q) => $q->whereNull('returned_at')->latest('checked_out_at')->limit(1)])
+            ->orderBy('name')
+            ->get()
+            ->map(function (Equipment $equipment) {
+                $equipment->activeCheckout = $equipment->checkouts->first();
+
+                return $equipment;
+            });
+
         return [
+            'equipmentBoard' => $equipmentBoard,
+            'availableCount' => $equipmentBoard->whereNull('activeCheckout')->count(),
             'checkouts' => EquipmentCheckout::query()
                 ->with(['equipment', 'checkedOutBy', 'returnedBy'])
                 ->when($this->statusFilter === 'out', fn ($q) => $q->whereNull('returned_at'))
@@ -141,14 +154,64 @@ new #[Layout('layouts.app')] #[Title('Bitácora de equipo')] class extends Compo
     <div class="py-10">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
 
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="flex items-center gap-4 bg-white dark:bg-gray-900 ring-1 ring-gray-200 dark:ring-gray-800 shadow-sm rounded-2xl p-5">
+                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-50 text-green-600 dark:bg-green-500/10 dark:text-green-400">
+                        <x-icon name="check-circle" class="w-5 h-5" />
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">Disponibles</p>
+                        <p class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ $availableCount }}</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 bg-white dark:bg-gray-900 ring-1 ring-gray-200 dark:ring-gray-800 shadow-sm rounded-2xl p-5">
+                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+                        <x-icon name="logbook" class="w-5 h-5" />
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">Afuera en servicio</p>
+                        <p class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ $outCount }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 ring-1 ring-gray-200 dark:ring-gray-800 shadow-sm rounded-2xl overflow-hidden">
+                <div class="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800">
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Estado actual de equipos</h3>
+                </div>
+                <ul class="divide-y divide-gray-100 dark:divide-gray-800">
+                    @forelse ($equipmentBoard as $equipment)
+                        <li class="px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <a href="{{ route('equipment.show', $equipment) }}" wire:navigate class="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline">
+                                    {{ $equipment->name }}
+                                </a>
+                                @if ($equipment->activeCheckout)
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                                        Con {{ $equipment->activeCheckout->taken_by }} en {{ $equipment->activeCheckout->destination }} · desde {{ $equipment->activeCheckout->checked_out_at->format('d/m/Y H:i') }}
+                                    </p>
+                                @endif
+                            </div>
+
+                            @if ($equipment->activeCheckout)
+                                <x-badge color="amber">Afuera</x-badge>
+                            @else
+                                <x-badge color="green">Disponible</x-badge>
+                            @endif
+                        </li>
+                    @empty
+                        <li class="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">No hay equipos activos registrados todavía.</li>
+                    @endforelse
+                </ul>
+            </div>
+
             <div class="flex flex-wrap items-center gap-3">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mr-auto">Historial de movimientos</h3>
                 <select wire:model.live="statusFilter" class="rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500">
                     <option value="">Todos</option>
                     <option value="out">Afuera</option>
                     <option value="returned">Reintegrados</option>
                 </select>
-
-                <span class="text-sm text-gray-500 dark:text-gray-400">{{ $outCount }} equipo(s) afuera ahora mismo</span>
             </div>
 
             <div class="bg-white dark:bg-gray-900 ring-1 ring-gray-200 dark:ring-gray-800 shadow-sm rounded-2xl overflow-hidden">
