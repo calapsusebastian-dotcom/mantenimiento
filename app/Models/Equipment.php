@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'code', 'name', 'category', 'brand', 'model', 'serial_number',
     'location', 'status', 'active', 'purchase_date', 'notes', 'created_by',
+    'hoja_vida_path', 'hoja_vida_name',
 ])]
 class Equipment extends Model
 {

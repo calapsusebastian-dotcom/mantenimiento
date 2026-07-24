@@ -13,8 +13,10 @@ use App\Models\MaintenancePlan;
 use App\Models\User;
 use App\Models\WorkOrder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
 use Tests\TestCase;
 
@@ -720,5 +722,69 @@ class MaintenanceSystemTest extends TestCase
             ->set('boardSearch', 'compresor')
             ->assertSee('Compresor libre')
             ->assertDontSee('Generador afuera');
+    }
+
+    public function test_admin_can_upload_a_hoja_de_vida_pdf_when_creating_equipment(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->makeUser(UserRole::Admin);
+        $pdf = UploadedFile::fake()->create('hoja-de-vida.pdf', 500, 'application/pdf');
+
+        Volt::actingAs($admin)
+            ->test('equipment.index')
+            ->set('code', 'EQ-HV1')
+            ->set('name', 'Compresor con hoja de vida')
+            ->set('hojaVida', $pdf)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $equipment = Equipment::where('code', 'EQ-HV1')->first();
+
+        $this->assertNotNull($equipment->hoja_vida_path);
+        $this->assertSame('hoja-de-vida.pdf', $equipment->hoja_vida_name);
+        Storage::disk('local')->assertExists($equipment->hoja_vida_path);
+    }
+
+    public function test_hoja_de_vida_rejects_non_pdf_files(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->makeUser(UserRole::Admin);
+        $image = UploadedFile::fake()->create('foto.jpg', 200, 'image/jpeg');
+
+        Volt::actingAs($admin)
+            ->test('equipment.index')
+            ->set('code', 'EQ-HV2')
+            ->set('name', 'Equipo con archivo invalido')
+            ->set('hojaVida', $image)
+            ->call('save')
+            ->assertHasErrors(['hojaVida' => 'mimes']);
+    }
+
+    public function test_admin_can_replace_and_remove_an_existing_hoja_de_vida(): void
+    {
+        Storage::fake('local');
+
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment([
+            'created_by' => $admin->id,
+            'hoja_vida_path' => 'hojas-vida/old.pdf',
+            'hoja_vida_name' => 'old.pdf',
+        ]);
+        Storage::disk('local')->put('hojas-vida/old.pdf', 'contenido');
+
+        Volt::actingAs($admin)
+            ->test('equipment.index')
+            ->call('edit', $equipment->id)
+            ->set('removeHojaVida', true)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $equipment->refresh();
+
+        $this->assertNull($equipment->hoja_vida_path);
+        $this->assertNull($equipment->hoja_vida_name);
+        Storage::disk('local')->assertMissing('hojas-vida/old.pdf');
     }
 }

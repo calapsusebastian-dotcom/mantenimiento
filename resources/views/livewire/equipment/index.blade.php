@@ -3,13 +3,16 @@
 use App\Enums\EquipmentStatus;
 use App\Models\Equipment;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Volt\Component;
+use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
 new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
 {
+    use WithFileUploads;
     use WithPagination;
 
     public string $search = '';
@@ -29,6 +32,9 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
     public string $status = 'operativo';
     public string $purchase_date = '';
     public string $notes = '';
+    public $hojaVida = null;
+    public ?string $existingHojaVidaName = null;
+    public bool $removeHojaVida = false;
 
     public function mount(): void
     {
@@ -67,6 +73,7 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
             'status' => ['required'],
             'purchase_date' => ['nullable', 'date'],
             'notes' => ['nullable', 'string'],
+            'hojaVida' => ['nullable', 'file', 'mimes:pdf', 'max:10240'],
         ];
     }
 
@@ -91,6 +98,8 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
         $this->status = $equipment->status->value;
         $this->purchase_date = $equipment->purchase_date?->format('Y-m-d') ?? '';
         $this->notes = (string) $equipment->notes;
+        $this->existingHojaVidaName = $equipment->hoja_vida_name;
+        $this->removeHojaVida = false;
 
         $this->showModal = true;
     }
@@ -100,8 +109,26 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
         $data = $this->validate();
         $data['purchase_date'] = $data['purchase_date'] ?: null;
 
-        if ($this->editingId) {
-            Equipment::findOrFail($this->editingId)->update($data);
+        $hojaVida = $data['hojaVida'] ?? null;
+        unset($data['hojaVida']);
+
+        $equipment = $this->editingId ? Equipment::findOrFail($this->editingId) : null;
+
+        if ($hojaVida) {
+            if ($equipment?->hoja_vida_path) {
+                Storage::disk('local')->delete($equipment->hoja_vida_path);
+            }
+
+            $data['hoja_vida_path'] = $hojaVida->store('hojas-vida', 'local');
+            $data['hoja_vida_name'] = $hojaVida->getClientOriginalName();
+        } elseif ($this->removeHojaVida && $equipment?->hoja_vida_path) {
+            Storage::disk('local')->delete($equipment->hoja_vida_path);
+            $data['hoja_vida_path'] = null;
+            $data['hoja_vida_name'] = null;
+        }
+
+        if ($equipment) {
+            $equipment->update($data);
         } else {
             $data['created_by'] = auth()->id();
             Equipment::create($data);
@@ -109,6 +136,15 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
 
         $this->showModal = false;
         $this->resetForm();
+    }
+
+    public function downloadHojaVida(int $id)
+    {
+        $equipment = Equipment::findOrFail($id);
+
+        abort_unless($equipment->hoja_vida_path && Storage::disk('local')->exists($equipment->hoja_vida_path), 404);
+
+        return Storage::disk('local')->download($equipment->hoja_vida_path, $equipment->hoja_vida_name ?? 'hoja-de-vida.pdf');
     }
 
     public function toggleActive(int $id): void
@@ -122,6 +158,7 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
         $this->reset([
             'editingId', 'code', 'name', 'category', 'brand', 'model',
             'serial_number', 'location', 'purchase_date', 'notes',
+            'hojaVida', 'existingHojaVidaName', 'removeHojaVida',
         ]);
         $this->status = 'operativo';
         $this->resetErrorBag();
@@ -205,6 +242,9 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
                                     @endunless
                                 </td>
                                 <td class="px-5 py-3.5 text-sm text-right space-x-3">
+                                    @if ($equipment->hoja_vida_path)
+                                        <button wire:click="downloadHojaVida({{ $equipment->id }})" title="Descargar hoja de vida" class="font-medium text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline">Hoja de vida</button>
+                                    @endif
                                     <button wire:click="edit({{ $equipment->id }})" class="font-medium text-indigo-600 dark:text-indigo-400 hover:underline">Editar</button>
                                     @if ($equipment->active)
                                         <button wire:click="toggleActive({{ $equipment->id }})" wire:confirm="¿Inactivar este equipo? Ya no aparecerá disponible para nuevas órdenes o planes." class="font-medium text-red-600 dark:text-red-400 hover:underline">Inactivar</button>
@@ -293,6 +333,24 @@ new #[Layout('layouts.app')] #[Title('Equipos')] class extends Component
                 <div class="sm:col-span-2">
                     <x-input-label for="notes" value="Notas" />
                     <textarea id="notes" wire:model="notes" rows="3" class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"></textarea>
+                </div>
+
+                <div class="sm:col-span-2">
+                    <x-input-label for="hojaVida" value="Hoja de vida (PDF)" />
+
+                    @if ($existingHojaVidaName && ! $removeHojaVida)
+                        <div class="flex items-center gap-3 mt-1 mb-2 p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 text-sm">
+                            <x-icon name="clipboard" class="w-4 h-4 shrink-0 text-gray-400" />
+                            <span class="flex-1 min-w-0 truncate text-gray-700 dark:text-gray-300">{{ $existingHojaVidaName }}</span>
+                            <button type="button" wire:click="$set('removeHojaVida', true)" class="shrink-0 text-xs font-medium text-red-600 dark:text-red-400 hover:underline">Quitar</button>
+                        </div>
+                    @endif
+
+                    <input id="hojaVida" type="file" wire:model="hojaVida" accept="application/pdf"
+                        class="block w-full text-sm text-gray-600 dark:text-gray-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-500/10 dark:file:text-indigo-400 hover:file:bg-indigo-100">
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Solo PDF, máximo 10 MB.</p>
+                    <div wire:loading wire:target="hojaVida" class="text-xs text-indigo-500 mt-1">Subiendo archivo...</div>
+                    <x-input-error :messages="$errors->get('hojaVida')" class="mt-2" />
                 </div>
             </div>
 

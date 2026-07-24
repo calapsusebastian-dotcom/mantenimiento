@@ -2,6 +2,7 @@
 
 use App\Models\Equipment;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Volt\Component;
@@ -15,6 +16,13 @@ new #[Layout('layouts.app')] #[Title('Historial de equipo')] class extends Compo
         Gate::authorize('manage-equipment');
 
         $this->equipment = $equipment;
+    }
+
+    public function downloadHojaVida()
+    {
+        abort_unless($this->equipment->hoja_vida_path && Storage::disk('local')->exists($this->equipment->hoja_vida_path), 404);
+
+        return Storage::disk('local')->download($this->equipment->hoja_vida_path, $this->equipment->hoja_vida_name ?? 'hoja-de-vida.pdf');
     }
 
     public function with(): array
@@ -38,6 +46,11 @@ new #[Layout('layouts.app')] #[Title('Historial de equipo')] class extends Compo
 <div x-on:livewire:navigated.window="$wire.$refresh()">
     <x-page-header :title="$equipment->name">
         <x-slot:actions>
+            @if ($equipment->hoja_vida_path)
+                <button wire:click="downloadHojaVida" class="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
+                    Hoja de vida (PDF)
+                </button>
+            @endif
             <a href="{{ route('equipment.index', ['edit' => $equipment->id]) }}" wire:navigate class="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
                 Editar equipo
             </a>
