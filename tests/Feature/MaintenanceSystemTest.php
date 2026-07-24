@@ -88,6 +88,26 @@ class MaintenanceSystemTest extends TestCase
             ->assertSee($tecnico->name);
     }
 
+    public function test_equipment_history_shows_its_checkout_log(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment(['created_by' => $admin->id]);
+        EquipmentCheckout::create([
+            'equipment_id' => $equipment->id,
+            'taken_by' => 'María López',
+            'destination' => 'Cliente XYZ',
+            'condition_out' => 'bueno',
+            'checked_out_by' => $admin->id,
+            'checked_out_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get('/equipos/'.$equipment->id)
+            ->assertOk()
+            ->assertSee('María López')
+            ->assertSee('Cliente XYZ');
+    }
+
     public function test_technicians_and_operators_cannot_access_equipment_history(): void
     {
         $tecnico = $this->makeUser(UserRole::Tecnico);

@@ -24,6 +24,7 @@ new #[Layout('layouts.app')] #[Title('Historial de equipo')] class extends Compo
         return [
             'workOrders' => $workOrders,
             'plans' => $this->equipment->maintenancePlans()->latest()->get(),
+            'checkouts' => $this->equipment->checkouts()->with(['checkedOutBy', 'returnedBy'])->latest('checked_out_at')->get(),
             'completedCount' => $workOrders->where('status', \App\Enums\WorkOrderStatus::Completada)->count(),
             'openCount' => $workOrders->whereIn('status', [
                 \App\Enums\WorkOrderStatus::Pendiente,
@@ -156,6 +157,59 @@ new #[Layout('layouts.app')] #[Title('Historial de equipo')] class extends Compo
                         @empty
                             <tr>
                                 <td colspan="5" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">Este equipo todavía no tiene órdenes de trabajo registradas.</td>
+                            </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="bg-white dark:bg-gray-900 ring-1 ring-gray-200 dark:ring-gray-800 shadow-sm rounded-2xl overflow-hidden">
+                <div class="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Historial de bitácora (salidas y regresos)</h3>
+                    <a href="{{ route('checkouts.index') }}" wire:navigate class="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">Ver bitácora completa →</a>
+                </div>
+                <table class="min-w-full divide-y divide-gray-100 dark:divide-gray-800">
+                    <thead class="bg-gray-50/60 dark:bg-gray-800/40">
+                        <tr>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Retirado por</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Destino</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Salida</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Regreso</th>
+                            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                        @forelse ($checkouts as $checkout)
+                            <tr wire:key="checkout-{{ $checkout->id }}" class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <td class="px-5 py-3.5 text-sm text-gray-900 dark:text-gray-100">{{ $checkout->taken_by }}</td>
+                                <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-300">{{ $checkout->destination }}</td>
+                                <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-300">
+                                    {{ $checkout->checked_out_at->format('d/m/Y H:i') }}
+                                    <span class="block text-xs">
+                                        <x-badge :color="$checkout->condition_out->color()">{{ $checkout->condition_out->label() }}</x-badge>
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3.5 text-sm text-gray-600 dark:text-gray-300">
+                                    @if ($checkout->returned_at)
+                                        {{ $checkout->returned_at->format('d/m/Y H:i') }}
+                                        <span class="block text-xs">
+                                            <x-badge :color="$checkout->condition_in->color()">{{ $checkout->condition_in->label() }}</x-badge>
+                                        </span>
+                                    @else
+                                        —
+                                    @endif
+                                </td>
+                                <td class="px-5 py-3.5 text-sm">
+                                    @if ($checkout->returned_at)
+                                        <x-badge color="green">Reintegrado</x-badge>
+                                    @else
+                                        <x-badge color="amber">Afuera</x-badge>
+                                    @endif
+                                </td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="5" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">Este equipo todavía no ha salido del parque.</td>
                             </tr>
                         @endforelse
                     </tbody>
