@@ -14,6 +14,7 @@ new #[Layout('layouts.app')] #[Title('Bitácora de equipo')] class extends Compo
     use WithPagination;
 
     public string $statusFilter = '';
+    public string $boardSearch = '';
 
     public bool $showCheckoutModal = false;
     public string $equipment_id = '';
@@ -119,8 +120,15 @@ new #[Layout('layouts.app')] #[Title('Bitácora de equipo')] class extends Compo
                 return $equipment;
             });
 
+        $filteredBoard = $this->boardSearch
+            ? $equipmentBoard->filter(fn (Equipment $equipment) => str_contains(
+                mb_strtolower($equipment->name.' '.$equipment->code),
+                mb_strtolower($this->boardSearch)
+            ))
+            : $equipmentBoard;
+
         return [
-            'equipmentBoard' => $equipmentBoard,
+            'equipmentBoard' => $filteredBoard,
             'availableCount' => $equipmentBoard->whereNull('activeCheckout')->count(),
             'checkouts' => EquipmentCheckout::query()
                 ->with(['equipment', 'checkedOutBy', 'returnedBy'])
@@ -176,8 +184,10 @@ new #[Layout('layouts.app')] #[Title('Bitácora de equipo')] class extends Compo
             </div>
 
             <div class="bg-white dark:bg-gray-900 ring-1 ring-gray-200 dark:ring-gray-800 shadow-sm rounded-2xl overflow-hidden">
-                <div class="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800">
+                <div class="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3">
                     <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Estado actual de equipos</h3>
+                    <input type="text" wire:model.live.debounce.300ms="boardSearch" placeholder="Buscar equipo por código o nombre..."
+                        class="w-full sm:w-64 rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500">
                 </div>
                 <ul class="divide-y divide-gray-100 dark:divide-gray-800">
                     @forelse ($equipmentBoard as $equipment)
@@ -200,7 +210,9 @@ new #[Layout('layouts.app')] #[Title('Bitácora de equipo')] class extends Compo
                             @endif
                         </li>
                     @empty
-                        <li class="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">No hay equipos activos registrados todavía.</li>
+                        <li class="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                            {{ $boardSearch ? 'Ningún equipo coincide con la búsqueda.' : 'No hay equipos activos registrados todavía.' }}
+                        </li>
                     @endforelse
                 </ul>
             </div>

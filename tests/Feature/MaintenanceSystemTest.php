@@ -688,4 +688,17 @@ class MaintenanceSystemTest extends TestCase
         $this->assertFalse($available->isCheckedOut());
         $this->assertTrue($outEquipment->isCheckedOut());
     }
+
+    public function test_bitacora_board_search_filters_by_equipment_name(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $this->makeEquipment(['code' => 'EQ-100', 'name' => 'Compresor libre']);
+        $this->makeEquipment(['code' => 'EQ-200', 'name' => 'Generador afuera']);
+
+        Volt::actingAs($admin)
+            ->test('checkouts.index')
+            ->set('boardSearch', 'compresor')
+            ->assertSee('Compresor libre')
+            ->assertDontSee('Generador afuera');
+    }
 }
