@@ -8,6 +8,7 @@ use App\Enums\WorkOrderPriority;
 use App\Enums\WorkOrderStatus;
 use App\Enums\WorkOrderType;
 use App\Models\Equipment;
+use App\Models\EquipmentCheckout;
 use App\Models\MaintenancePlan;
 use App\Models\User;
 use App\Models\WorkOrder;
@@ -570,5 +571,94 @@ class MaintenanceSystemTest extends TestCase
 
         $component->call('previousMonth');
         $this->assertSame($currentMonth, $component->get('month'));
+    }
+
+    public function test_technician_can_register_an_equipment_checkout(): void
+    {
+        $tecnico = $this->makeUser(UserRole::Tecnico);
+        $equipment = $this->makeEquipment(['name' => 'Taladro portátil']);
+
+        Volt::actingAs($tecnico)
+            ->test('checkouts.index')
+            ->set('equipment_id', (string) $equipment->id)
+            ->set('taken_by', 'Juan Pérez')
+            ->set('destination', 'Obra Nave 3')
+            ->set('condition_out', 'bueno')
+            ->call('checkout')
+            ->assertHasNoErrors();
+
+        $checkout = EquipmentCheckout::where('equipment_id', $equipment->id)->first();
+
+        $this->assertNotNull($checkout);
+        $this->assertSame('Juan Pérez', $checkout->taken_by);
+        $this->assertTrue($equipment->isCheckedOut());
+    }
+
+    public function test_operator_cannot_register_a_checkout_but_can_view_the_bitacora(): void
+    {
+        $operador = $this->makeUser(UserRole::Operador);
+        $equipment = $this->makeEquipment();
+
+        $this->actingAs($operador)->get('/bitacora')->assertOk();
+
+        Volt::actingAs($operador)
+            ->test('checkouts.index')
+            ->set('equipment_id', (string) $equipment->id)
+            ->set('taken_by', 'Alguien')
+            ->set('destination', 'Otro lado')
+            ->call('checkout')
+            ->assertForbidden();
+    }
+
+    public function test_equipment_already_checked_out_cannot_be_checked_out_again(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment();
+        EquipmentCheckout::create([
+            'equipment_id' => $equipment->id,
+            'taken_by' => 'Primera persona',
+            'destination' => 'Primer destino',
+            'condition_out' => 'bueno',
+            'checked_out_by' => $admin->id,
+            'checked_out_at' => now(),
+        ]);
+
+        Volt::actingAs($admin)
+            ->test('checkouts.index')
+            ->set('equipment_id', (string) $equipment->id)
+            ->set('taken_by', 'Segunda persona')
+            ->set('destination', 'Segundo destino')
+            ->call('checkout')
+            ->assertForbidden();
+
+        $this->assertSame(1, EquipmentCheckout::where('equipment_id', $equipment->id)->count());
+    }
+
+    public function test_admin_can_register_the_return_of_a_checked_out_equipment(): void
+    {
+        $admin = $this->makeUser(UserRole::Admin);
+        $equipment = $this->makeEquipment();
+        $checkout = EquipmentCheckout::create([
+            'equipment_id' => $equipment->id,
+            'taken_by' => 'Juan Pérez',
+            'destination' => 'Obra Nave 3',
+            'condition_out' => 'bueno',
+            'checked_out_by' => $admin->id,
+            'checked_out_at' => now(),
+        ]);
+
+        Volt::actingAs($admin)
+            ->test('checkouts.index')
+            ->call('openReturnModal', $checkout->id)
+            ->set('condition_in', 'regular')
+            ->set('return_notes', 'Golpe leve en la carcasa.')
+            ->call('confirmReturn');
+
+        $checkout->refresh();
+
+        $this->assertNotNull($checkout->returned_at);
+        $this->assertSame('regular', $checkout->condition_in->value);
+        $this->assertSame($admin->id, $checkout->returned_by);
+        $this->assertFalse($equipment->isCheckedOut());
     }
 }

@@ -62,5 +62,9 @@
             <circle cx="17" cy="8" r="2.5" />
             <path d="M15 20c.3-2.7 2-5 4.5-5" />
             @break
+        @case('logbook')
+            <path d="M5 4h11a2 2 0 0 1 2 2v13l-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2Z" />
+            <path d="M8 9h6M8 13h4" />
+            @break
     @endswitch
 </svg>

@@ -27,6 +27,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('manage-maintenance-plans', fn (User $user) => $user->isAdmin());
         Gate::define('manage-users', fn (User $user) => $user->isAdmin());
 
+        // Admin y técnicos registran salidas/regresos de equipo en la bitácora.
+        Gate::define('manage-checkouts', fn (User $user) => $user->isAdmin() || $user->isTecnico());
+
         // Administrador y técnicos asignan órdenes de trabajo a técnicos.
         Gate::define('assign-work-orders', fn (User $user) => $user->isAdmin());
 

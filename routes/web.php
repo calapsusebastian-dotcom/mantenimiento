@@ -19,6 +19,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Volt::route('ordenes/reportar', 'work-orders.report')->name('work-orders.report');
     Volt::route('ordenes/{workOrder}', 'work-orders.show')->name('work-orders.show');
     Volt::route('calendario', 'calendar.index')->name('calendar.index');
+    Volt::route('bitacora', 'checkouts.index')->name('checkouts.index');
 });
 
 Route::view('profile', 'profile')

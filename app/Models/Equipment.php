@@ -50,4 +50,17 @@ class Equipment extends Model
     {
         return $this->hasMany(WorkOrder::class);
     }
+
+    /**
+     * @return HasMany<EquipmentCheckout, $this>
+     */
+    public function checkouts(): HasMany
+    {
+        return $this->hasMany(EquipmentCheckout::class);
+    }
+
+    public function isCheckedOut(): bool
+    {
+        return $this->checkouts()->whereNull('returned_at')->exists();
+    }
 }

@@ -97,6 +97,12 @@ new class extends Component
                 {{ __('Calendario') }}
             </a>
 
+            @php($l = $navLink('checkouts.index', 'logbook', 'Bitácora de equipo'))
+            <a href="{{ route('checkouts.index') }}" wire:navigate class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition {{ $l['classes'] }}">
+                <x-icon name="logbook" class="w-5 h-5 {{ $l['iconClasses'] }}" />
+                {{ __('Bitácora de equipo') }}
+            </a>
+
             @php($l = $navLink('work-orders.report', 'alert', 'Reportar falla'))
             <a href="{{ route('work-orders.report') }}" wire:navigate class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition {{ $l['classes'] }}">
                 <x-icon name="alert" class="w-5 h-5 {{ $l['iconClasses'] }}" />
